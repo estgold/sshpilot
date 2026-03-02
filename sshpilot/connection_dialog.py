@@ -2151,7 +2151,7 @@ Host {getattr(self, 'nickname_row', None).get_text().strip() if hasattr(self, 'n
         wol_group.add(self.wol_mac_row)
         self.wol_broadcast_row = Adw.EntryRow(title=_("Broadcast IP (optional)"))
         if self.wol_broadcast_row.get_child() and hasattr(self.wol_broadcast_row.get_child(), 'set_placeholder_text'):
-            self.wol_broadcast_row.get_child().set_placeholder_text("255.255.255.255 or 192.168.1.255")
+            self.wol_broadcast_row.get_child().set_placeholder_text("e.g. 192.168.1.255")
         wol_group.add(self.wol_broadcast_row)
         self.wol_port_row = Adw.EntryRow(title=_("WoL port (optional)"))
         try:

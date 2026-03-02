@@ -13,7 +13,10 @@ from logging.handlers import RotatingFileHandler
 import gi
 gi.require_version('Adw', '1')
 gi.require_version('Gtk', '4.0')
-gi.require_version('Vte', '3.91')
+try:
+    gi.require_version('Vte', '3.91')
+except ValueError:
+    gi.require_version('Vte', '2.91')
 
 from gi.repository import Adw, Gtk, Gio, GLib, Gdk
 

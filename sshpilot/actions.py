@@ -259,7 +259,9 @@ class WindowActions:
                 port = int(meta.get('wol_port', 9) or 9)
             except (TypeError, ValueError):
                 port = 9
-            ok, msg = wol.send_wol(mac, broadcast_ip=broadcast, port=port)
+            host = getattr(connection, 'hostname', None) or getattr(connection, 'host', None)
+            host_str = (host or '').strip() or None
+            ok, msg = wol.send_wol(mac, broadcast_ip=broadcast, port=port, host=host_str)
             toast_overlay = getattr(self, 'toast_overlay', None)
             if toast_overlay:
                 toast_msg = _("Wake-on-LAN sent") if ok else _("Wake-on-LAN failed: %s") % msg
