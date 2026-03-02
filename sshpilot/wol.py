@@ -55,13 +55,15 @@ def send_wol(
     mac: str,
     broadcast_ip: Optional[str] = None,
     port: int = 9,
+    host: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
     Send a Wake-on-LAN magic packet.
 
     :param mac: MAC address (e.g. aa:bb:cc:dd:ee:ff or aa-bb-cc-dd-ee-ff).
-    :param broadcast_ip: Optional. Default is 255.255.255.255. Use e.g. 192.168.1.255 for subnet.
+    :param broadcast_ip: Optional. If not set and host is set, subnet broadcast is used (recommended).
     :param port: UDP port (default 9).
+    :param host: Optional. When broadcast_ip is not set, used to derive subnet broadcast (e.g. 192.168.1.255).
     :return: (success, message).
     """
     if not _WOL_AVAILABLE:
@@ -69,17 +71,45 @@ def send_wol(
     mac_norm = normalize_mac(mac)
     if not validate_mac(mac_norm):
         return False, "Invalid MAC address."
+    target = broadcast_ip
+    if not target and host:
+        ip = _resolve_host_to_ip(host, port=port)
+        if ip:
+            target = get_subnet_broadcast(ip, prefix_bits=24)
+    if not target:
+        target = "255.255.255.255"
     try:
         send_magic_packet(
             mac_norm,
-            ip_address=broadcast_ip or "255.255.255.255",
+            ip_address=target,
             port=port,
         )
-        logger.info("WoL magic packet sent for %s to %s:%s", mac_norm, broadcast_ip or "255.255.255.255", port)
+        logger.info("WoL magic packet sent for %s to %s:%s", mac_norm, target, port)
         return True, "Magic packet sent."
     except Exception as e:
         logger.warning("WoL send failed: %s", e)
         return False, str(e)
+
+
+def get_subnet_broadcast(host_ip: str, prefix_bits: int = 24) -> Optional[str]:
+    """
+    Compute subnet-directed broadcast address for a host (e.g. 192.168.1.50 -> 192.168.1.255).
+    Many routers and NICs only wake on subnet broadcast, not 255.255.255.255.
+    """
+    if not host_ip or not isinstance(host_ip, str):
+        return None
+    host_ip = host_ip.strip()
+    try:
+        addr = socket.inet_pton(socket.AF_INET, host_ip)
+    except OSError:
+        return None
+    ip_int = int.from_bytes(addr, "big")
+    if prefix_bits <= 0 or prefix_bits >= 32:
+        return None
+    mask = (0xFFFFFFFF << (32 - prefix_bits)) & 0xFFFFFFFF
+    net = ip_int & mask
+    broadcast_int = net | (0xFFFFFFFF ^ mask)
+    return socket.inet_ntoa(broadcast_int.to_bytes(4, "big"))
 
 
 def _resolve_host_to_ip(host: str, port: int = 22) -> Optional[str]:
@@ -138,6 +168,19 @@ def _read_arp_linux(ip: str) -> Optional[str]:
     return None
 
 
+def _pad_mac_octets(mac_str: str) -> str:
+    """Normalize macOS-style MAC (optional single-digit octets) to 2 digits per octet."""
+    if not mac_str or not isinstance(mac_str, str):
+        return ""
+    parts = mac_str.strip().replace("-", ":").split(":")
+    if len(parts) != 6:
+        return mac_str
+    try:
+        return ":".join(p.zfill(2) for p in parts)
+    except Exception:
+        return mac_str
+
+
 def _read_arp_macos(ip: str) -> Optional[str]:
     """Read MAC for the given IP from 'arp -a' on macOS."""
     try:
@@ -150,12 +193,16 @@ def _read_arp_macos(ip: str) -> Optional[str]:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.debug("arp -a failed: %s", e)
         return None
-    # Lines like: host (192.168.1.50) at aa:bb:cc:dd:ee:ff on en0
+    # Lines like: ? (192.168.1.50) at 0:22:7:4a:21:d5 on en0 — macOS omits leading zeros in octets
     pattern = re.compile(r"\s+\(" + re.escape(ip) + r"\)\s+at\s+([0-9a-fA-F:]+)\s", re.IGNORECASE)
     for line in (out.stdout or "").splitlines():
         m = pattern.search(line)
-        if m and validate_mac(m.group(1)):
-            return normalize_mac(m.group(1))
+        if not m:
+            continue
+        raw = m.group(1)
+        padded = _pad_mac_octets(raw)
+        if validate_mac(padded):
+            return normalize_mac(padded)
     return None
 
 
