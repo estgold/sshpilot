@@ -123,20 +123,7 @@ class BaseTerminalBackend(Protocol):
 
 from typing import TYPE_CHECKING
 
-gi.require_version("Gdk", "4.0")
-try:
-    gi.require_version("Vte", "3.91")
-except ValueError:
-    gi.require_version("Vte", "2.91")
-try:
-    from gi.repository import Gdk, GLib, Pango, Vte
-except ImportError as e:
-    if "Gtk' version '3.0'" in str(e) and "4.0' is already loaded" in str(e):
-        raise ImportError(
-            "Vte is linked against GTK3 instead of GTK4. On Fedora/RHEL install the GTK4 "
-            "Vte package: sudo dnf install vte291-gtk4"
-        ) from e
-    raise
+from gi.repository import Gdk, GLib, Pango, Vte
 
 if TYPE_CHECKING:  # pragma: no cover - import only for type checking
     from .terminal import TerminalWidget
