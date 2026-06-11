@@ -1,6 +1,8 @@
 """
 Wake-on-LAN support for sshPilot.
 Sends magic packets and can detect MAC from local ARP table (host must be on and reachable).
+
+Flatpak sandbox workarounds live in :mod:`sshpilot.wol_flatpak`.
 """
 
 import logging
@@ -9,6 +11,8 @@ import socket
 import subprocess
 import platform
 from typing import Optional, Tuple
+
+from sshpilot.platform_utils import is_flatpak
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +70,6 @@ def send_wol(
     :param host: Optional. When broadcast_ip is not set, used to derive subnet broadcast (e.g. 192.168.1.255).
     :return: (success, message).
     """
-    if not _WOL_AVAILABLE:
-        return False, "Wake-on-LAN support is not installed (pip install wakeonlan)."
     mac_norm = normalize_mac(mac)
     if not validate_mac(mac_norm):
         return False, "Invalid MAC address."
@@ -78,6 +80,13 @@ def send_wol(
             target = get_subnet_broadcast(ip)
     if not target:
         target = "255.255.255.255"
+
+    if is_flatpak():
+        from . import wol_flatpak
+        return wol_flatpak.send_wol(mac_norm, target, port)
+
+    if not _WOL_AVAILABLE:
+        return False, "Wake-on-LAN support is not installed (pip install wakeonlan)."
     try:
         send_magic_packet(
             mac_norm,
@@ -96,10 +105,17 @@ def get_subnet_broadcast(host_ip: str) -> Optional[str]:
     Compute the directed broadcast address for the local interface that can reach host_ip.
     Queries actual interface netmasks via psutil so non-/24 subnets work correctly.
     Falls back to 255.255.255.255 if the interface cannot be determined.
+
+    In Flatpak, delegates to :mod:`sshpilot.wol_flatpak`.
     """
     if not host_ip or not isinstance(host_ip, str):
         return None
     host_ip = host_ip.strip()
+
+    if is_flatpak():
+        from . import wol_flatpak
+        return wol_flatpak.get_subnet_broadcast(host_ip)
+
     try:
         target_bytes = socket.inet_pton(socket.AF_INET, host_ip)
     except OSError:
@@ -133,7 +149,7 @@ def _resolve_host_to_ip(host: str, port: int = 22) -> Optional[str]:
     host = host.strip()
     # If it's already an IPv4 address, return as-is
     try:
-        addr = socket.inet_pton(socket.AF_INET, host)
+        socket.inet_pton(socket.AF_INET, host)
         return host
     except OSError:
         pass
@@ -249,6 +265,8 @@ def get_mac_from_arp(host: str, port: int = 22, trigger_first: bool = True) -> O
     The host must be on the same subnet and reachable. If trigger_first is True,
     a short TCP connection to the given port is made so the host appears in ARP.
 
+    In Flatpak, delegates to :mod:`sshpilot.wol_flatpak`.
+
     :param host: Hostname or IP address.
     :param port: Port to connect to to populate ARP (default 22).
     :param trigger_first: If True, try to connect to host:port before reading ARP.
@@ -257,14 +275,19 @@ def get_mac_from_arp(host: str, port: int = 22, trigger_first: bool = True) -> O
     ip = _resolve_host_to_ip(host, port)
     if not ip:
         return None
+
+    if is_flatpak():
+        from . import wol_flatpak
+        return wol_flatpak.get_mac_from_arp(ip, port, trigger_first)
+
     if trigger_first:
         _trigger_arp(ip, port=port)
-    sys = platform.system()
-    if sys == "Linux":
+    system = platform.system()
+    if system == "Linux":
         return _read_arp_linux(ip)
-    if sys == "Darwin":
+    if system == "Darwin":
         return _read_arp_macos(ip)
-    if sys == "Windows":
+    if system == "Windows":
         return _read_arp_windows(ip)
     # Fallback: try Linux-style path (e.g. some BSDs)
     return _read_arp_linux(ip)
